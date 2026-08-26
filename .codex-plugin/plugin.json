@@ -1,0 +1,18 @@
+{
+  "name": "agent-content-firewall",
+  "version": "0.2.0",
+  "description": "Local firewall for malicious content and shell tool calls",
+  "author": {
+    "name": "TeshengLee"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Content Firewall",
+    "shortDescription": "Block malicious content and unsafe shell tool calls.",
+    "longDescription": "Runs local deterministic checks on documents, tool output, sensitive paths, and shell commands before allowing agent workflows to continue.",
+    "developerName": "TeshengLee",
+    "category": "Developer Tools",
+    "capabilities": ["hooks", "skills"],
+    "defaultPrompt": "Check untrusted content and shell commands before reading or acting on them."
+  }
+}

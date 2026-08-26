@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$AGENT_CONTENT_FIREWALL_ROOT/adapters/policy_hook.py\" --client codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$AGENT_CONTENT_FIREWALL_ROOT/adapters/common_hook.py\" --client codex --phase pre",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$AGENT_CONTENT_FIREWALL_ROOT/adapters/common_hook.py\" --client codex --phase post",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

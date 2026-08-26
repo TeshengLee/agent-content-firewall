@@ -1,0 +1,44 @@
+{
+  "description": "Local content preflight checks",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/adapters/policy_hook.py\" --client codex",
+            "timeout": 10,
+            "statusMessage": "Loading content trust policy"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|view_image|mcp__filesystem__read_file|mcp__filesystem__read_multiple_files)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/adapters/common_hook.py\" --client codex --phase pre",
+            "timeout": 600,
+            "statusMessage": "Checking untrusted content"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__.*$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/adapters/common_hook.py\" --client codex --phase post",
+            "timeout": 120,
+            "statusMessage": "Checking tool output"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+# Validated against deepseek-ai/deepseek-harness revision
+# b150a551b8d465e31e418e1b2eaf5e79bbb7d28e (developer preview).
+- insert:
+    - id: agent-content-firewall-hooks
+      name: '@deepseek-ai/dsh-hooks-codex'
+      config:
+        configPath: !!js process.env.AGENT_CONTENT_FIREWALL_ROOT + '/adapters/deepseek-harness/hooks.json'
+        model: deepseek
+        defaultTimeoutMs: 600000
+        stderrSummaryMaxChars: 500

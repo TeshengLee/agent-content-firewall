@@ -1,0 +1,41 @@
+{
+  "description": "Local content preflight checks",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CODEBUDDY_PLUGIN_ROOT}/adapters/policy_hook.py\" --client workbuddy",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Write|Edit|Bash|WebSearch|WebFetch|read_file|write_to_file|replace_in_file|exec_command|execute_command|web_search|web_fetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CODEBUDDY_PLUGIN_ROOT}/adapters/common_hook.py\" --client workbuddy --phase pre",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read|Write|Edit|Bash|WebSearch|WebFetch|read_file|write_to_file|replace_in_file|exec_command|execute_command|web_search|web_fetch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CODEBUDDY_PLUGIN_ROOT}/adapters/common_hook.py\" --client workbuddy --phase post",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

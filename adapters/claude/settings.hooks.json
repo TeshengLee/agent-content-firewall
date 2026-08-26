@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$AGENT_CONTENT_FIREWALL_ROOT/adapters/policy_hook.py\" --client claude",
+            "timeout": 10,
+            "statusMessage": "Loading content trust policy"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash|WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$AGENT_CONTENT_FIREWALL_ROOT/adapters/common_hook.py\" --client claude --phase pre",
+            "timeout": 600,
+            "statusMessage": "Checking untrusted content"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "WebFetch|WebSearch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$AGENT_CONTENT_FIREWALL_ROOT/adapters/common_hook.py\" --client claude --phase post",
+            "timeout": 120,
+            "statusMessage": "Checking tool output"
+          }
+        ]
+      }
+    ]
+  }
+}
