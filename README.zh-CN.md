@@ -9,6 +9,8 @@ AI 智能体的本地安全防火墙，拦截恶意内容，防范智能体被�
 - 通过 `pdf-injection-scanner` 检查 PDF 文字颜色和字号
 - 通过 Poppler 和 Tesseract 完成 PDF 渲染与本地 OCR
 - 检查 PDF 元数据、JavaScript 和嵌入附件
+- 检查 EPUB 容器、大批量图片及其本地 OCR 结果
+- 通过隔离的 KindleUnpack 解包链检查未加密的 AZW3 和 MOBI 文件
 - 检查 DOCX 隐藏文字、宏、嵌入对象、替代文本和外部关系
 - 检查 HTML 隐藏内容、批注、属性、活动元素和屏幕外样式
 - 检查零宽字符、双向控制字符和 Unicode 标签字符
@@ -71,7 +73,7 @@ python3 scripts/install_codex.py --apply
 
 第三方模型或 API 中转站可以在响应到达智能体之前篡改回复和工具调用。不要将不可信中转站与完全访问权限或无人值守执行结合使用。Shell 命令检查只是纵深防护，不能替代可信模型端点、沙箱、操作确认和受限网络访问。
 
-本项目不会启动后台服务，也不会启用远程语义分类器。扫描器除 PDF、DOCX、HTML、文本和图片预检外，也支持 EPUB 容器与常见项目配置格式检查。PDF 解析依赖已锁定在 `uv.lock` 中，来源为开源项目 [`pdf-injection-scanner`](https://github.com/Andy8647/pdf-injection-scanner)。
+本项目不会启动后台服务，也不会启用远程语义分类器。扫描器支持 EPUB、未加密的 AZW3/MOBI、常见项目配置、PDF、DOCX、HTML、文本和图片预检。格式依赖均锁定在 `uv.lock` 中，许可证详见[第三方组件说明](THIRD_PARTY_NOTICES.md)。
 
 ## 开发与验证
 

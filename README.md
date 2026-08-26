@@ -9,6 +9,8 @@ Agent Content Firewall is a local security firewall for AI agents. It blocks mal
 - PDF text color and size through `pdf-injection-scanner`
 - PDF rendering and local OCR through Poppler and Tesseract
 - PDF metadata, JavaScript, and embedded attachments
+- EPUB container safety, large image collections, and local OCR
+- unencrypted AZW3 and MOBI files through isolated KindleUnpack extraction
 - hidden DOCX runs, macros, embedded objects, alternative text, and external relationships
 - hidden HTML, comments, attributes, active elements, and off-screen styles
 - zero-width, bidirectional, and Unicode tag characters
@@ -71,7 +73,7 @@ This is a tripwire, not proof that content is safe. Direct inline attachments, c
 
 A third-party model or API relay can alter assistant responses and tool calls before they reach the agent. Never combine an untrusted relay with full access or unattended execution. Shell-command checks are defense in depth, not a substitute for a trusted model endpoint, sandboxing, approvals, and restricted network access.
 
-No background service or remote semantic classifier is enabled. The scanner supports EPUB container inspection and common project configuration formats in addition to PDF, DOCX, HTML, text, and image preflight. The PDF parser dependency is pinned in `uv.lock` and sourced from the open-source [`pdf-injection-scanner`](https://github.com/Andy8647/pdf-injection-scanner) project.
+No background service or remote semantic classifier is enabled. The scanner supports EPUB, unencrypted AZW3/MOBI, common project configuration formats, PDF, DOCX, HTML, text, and image preflight. Format dependencies are pinned in `uv.lock`; see [Third-Party Notices](THIRD_PARTY_NOTICES.md) for their licenses.
 
 ## Development
 

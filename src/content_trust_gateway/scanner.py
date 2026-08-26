@@ -22,7 +22,13 @@ MAX_TEXT_CHARS = 2_000_000
 MAX_EPUB_UNCOMPRESSED_BYTES = 300 * 1024 * 1024
 MAX_EPUB_MEMBER_BYTES = 25 * 1024 * 1024
 MAX_EPUB_TEXT_CHARS = 20_000_000
-MAX_EPUB_IMAGES = 500
+MAX_EPUB_IMAGES = 2000
+MAX_AZW3_EXTRACTED_BYTES = 300 * 1024 * 1024
+MAX_AZW3_EXTRACTED_FILES = 5000
+MAX_PDF_PAGES = 5000
+PDF_RENDER_BATCH_SIZE = 25
+OCR_BATCH_SIZE = 25
+EXFIL_CONTEXT_CHARS = 240
 
 ZERO_WIDTH = {
     "\u00ad",
@@ -79,6 +85,8 @@ AGENT_TERMS = re.compile(
 TARGET_SUFFIXES = {
     ".pdf",
     ".epub",
+    ".azw3",
+    ".mobi",
     ".docx",
     ".docm",
     ".doc",
@@ -161,9 +169,13 @@ def _has_instruction(text: str) -> bool:
 
 
 def _has_exfiltration(text: str) -> bool:
-    return AGENT_TERMS.search(text) is not None and any(
-        pattern.search(text) for pattern in EXFIL_PATTERNS
-    )
+    for pattern in EXFIL_PATTERNS:
+        for match in pattern.finditer(text):
+            start = max(0, match.start() - EXFIL_CONTEXT_CHARS)
+            end = min(len(text), match.end() + EXFIL_CONTEXT_CHARS)
+            if AGENT_TERMS.search(text[start:end]):
+                return True
+    return False
 
 
 def _scan_unicode(text: str, result: ScanResult, location: str) -> None:
@@ -425,6 +437,7 @@ def _scan_epub(path: Path, sha256: str) -> ScanResult:
             image_count = 0
             with tempfile.TemporaryDirectory() as directory:
                 image_directory = Path(directory)
+                images_to_ocr: list[Path] = []
                 for index, info in enumerate(infos):
                     if info.is_dir():
                         continue
@@ -495,9 +508,79 @@ def _scan_epub(path: Path, sha256: str) -> ScanResult:
                                 Finding("EPUB_IMAGE_WRITE_ERROR", "error", member)
                             )
                             continue
-                        _ocr_image(output, result, f"{member} OCR")
+                        images_to_ocr.append(output)
+                _ocr_images(images_to_ocr, result, "EPUB image OCR")
     except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
         result.add(Finding("INVALID_EPUB_PACKAGE", "error", "package"))
+    return result
+
+
+def _scan_azw3(path: Path, sha256: str) -> ScanResult:
+    result = _new_result(path.suffix.lower().lstrip("."), sha256)
+    unpacker = _find_runtime_command("mobiunpack")
+    if not unpacker:
+        result.add(Finding("AZW3_UNPACKER_UNAVAILABLE", "review", "environment"))
+        return result
+
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "unpacked"
+            completed = _run([unpacker, str(path), str(output)], timeout=180)
+            if completed.returncode != 0 or not output.is_dir():
+                result.add(Finding("AZW3_UNPACK_ERROR", "error", "document"))
+                return result
+
+            files = [item for item in output.rglob("*") if item.is_file()]
+            if any(item.is_symlink() for item in output.rglob("*")):
+                result.add(Finding("AZW3_UNSAFE_LINK", "block", "package"))
+                return result
+            if len(files) > MAX_AZW3_EXTRACTED_FILES:
+                result.add(Finding("AZW3_FILE_LIMIT_EXCEEDED", "review", "package"))
+                return result
+            if sum(item.stat().st_size for item in files) > MAX_AZW3_EXTRACTED_BYTES:
+                result.add(Finding("AZW3_SIZE_LIMIT_EXCEEDED", "review", "package"))
+                return result
+
+            payloads = sorted(
+                item for item in files if item.suffix.lower() in {".epub", ".pdf"}
+            )
+            if payloads:
+                for payload in payloads:
+                    if payload.stat().st_size > MAX_FILE_BYTES:
+                        result.add(
+                            Finding("AZW3_PAYLOAD_LIMIT_EXCEEDED", "review", "package")
+                        )
+                        continue
+                    if payload.suffix.lower() == ".epub":
+                        nested = _scan_epub(payload, sha256)
+                    else:
+                        nested = _scan_pdf(payload, sha256)
+                    _merge_result(result, nested, "AZW3 payload")
+                return result
+
+            html_files = sorted(
+                item
+                for item in files
+                if item.suffix.lower() in {".html", ".htm", ".xhtml"}
+            )
+            if not html_files:
+                result.add(Finding("AZW3_PAYLOAD_UNSUPPORTED", "review", "package"))
+                return result
+            for html_file in html_files:
+                text = html_file.read_text(encoding="utf-8", errors="replace")
+                _merge_result(result, _scan_html(text, sha256), "AZW3 HTML")
+            image_files = [
+                item
+                for item in files
+                if item.suffix.lower()
+                in {".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif", ".gif"}
+            ]
+            if len(image_files) > MAX_EPUB_IMAGES:
+                result.add(Finding("AZW3_IMAGE_LIMIT_EXCEEDED", "review", "package"))
+                return result
+            _ocr_images(image_files, result, "AZW3 image OCR")
+    except (OSError, subprocess.SubprocessError):
+        result.add(Finding("AZW3_UNPACK_ERROR", "error", "document"))
     return result
 
 
@@ -522,6 +605,19 @@ def _run(command: list[str], timeout: int = 45) -> subprocess.CompletedProcess[s
         text=True,
         timeout=timeout,
         env={**os.environ, "NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+
+def _find_runtime_command(name: str) -> str | None:
+    command = shutil.which(name)
+    if command:
+        return command
+    candidates = [
+        Path(sys.executable).parent / name,
+        Path(__file__).resolve().parents[2] / ".venv" / "bin" / name,
+    ]
+    return next(
+        (str(candidate) for candidate in candidates if candidate.is_file()), None
     )
 
 
@@ -558,19 +654,64 @@ def _ocr_image(path: Path, result: ScanResult, location: str) -> bool:
     return True
 
 
+def _ocr_images(paths: list[Path], result: ScanResult, location: str) -> bool:
+    if not paths:
+        return True
+    tesseract = shutil.which("tesseract")
+    if not tesseract:
+        result.add(Finding("LOCAL_OCR_UNAVAILABLE", "review", "environment"))
+        return False
+    for start in range(0, len(paths), OCR_BATCH_SIZE):
+        batch = paths[start : start + OCR_BATCH_SIZE]
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                listing = Path(directory) / "images.txt"
+                listing.write_text(
+                    "\n".join(str(path) for path in batch) + "\n",
+                    encoding="utf-8",
+                )
+                completed = _run(
+                    [
+                        tesseract,
+                        str(listing),
+                        "stdout",
+                        "-l",
+                        _ocr_languages(tesseract),
+                    ],
+                    timeout=max(90, len(batch) * 20),
+                )
+        except (OSError, subprocess.SubprocessError):
+            result.add(Finding("LOCAL_OCR_ERROR", "review", location))
+            return False
+        if completed.returncode != 0:
+            result.add(Finding("LOCAL_OCR_ERROR", "review", location))
+            return False
+        end = start + len(batch)
+        _scan_language(completed.stdout, result, f"{location} {start + 1}-{end}")
+    return True
+
+
+def _merge_pdf_scanner_finding(result: ScanResult, finding: dict[str, object]) -> None:
+    severity = str(finding.get("severity", "medium")).lower()
+    finding_type = str(finding.get("type", "")).lower()
+    page = f"page {finding.get('page', '?')}"
+    if severity == "high":
+        result.add(Finding("PDF_SCANNER_FINDING", "block", page))
+        return
+    if "suspicious pattern" in finding_type:
+        content = str(finding.get("content", ""))
+        local = scan_text(content, kind="pdf-scanner", location=page)
+        if local.findings:
+            _merge_result(result, local, "PDF scanner")
+        elif not content:
+            result.add(Finding("PDF_SCANNER_FINDING", "review", page))
+        return
+    result.add(Finding("PDF_SCANNER_FINDING", "review", page))
+
+
 def _scan_pdf(path: Path, sha256: str) -> ScanResult:
     result = _new_result("pdf", sha256)
-    scanner = shutil.which("pdf-scan")
-    if not scanner:
-        local_scanner = Path(sys.executable).resolve().parent / "pdf-scan"
-        if local_scanner.is_file():
-            scanner = str(local_scanner)
-    if not scanner:
-        project_scanner = (
-            Path(__file__).resolve().parents[2] / ".venv" / "bin" / "pdf-scan"
-        )
-        if project_scanner.is_file():
-            scanner = str(project_scanner)
+    scanner = _find_runtime_command("pdf-scan")
     if scanner:
         try:
             completed = _run([scanner, str(path), "--json"], timeout=90)
@@ -579,15 +720,7 @@ def _scan_pdf(path: Path, sha256: str) -> ScanResult:
                 result.add(Finding("PDF_SCANNER_ERROR", "error", "document"))
             else:
                 for finding in findings:
-                    severity = str(finding.get("severity", "medium")).lower()
-                    mapped = "block" if severity == "high" else "review"
-                    result.add(
-                        Finding(
-                            "PDF_SCANNER_FINDING",
-                            mapped,
-                            f"page {finding.get('page', '?')}",
-                        )
-                    )
+                    _merge_pdf_scanner_finding(result, finding)
         except (OSError, subprocess.SubprocessError):
             result.add(Finding("PDF_SCANNER_ERROR", "error", "document"))
     else:
@@ -604,9 +737,16 @@ def _scan_pdf(path: Path, sha256: str) -> ScanResult:
         except (OSError, subprocess.SubprocessError):
             result.add(Finding("PDF_TEXT_EXTRACTION_ERROR", "review", "document"))
 
+    page_count: int | None = None
     pdfinfo = shutil.which("pdfinfo")
     if pdfinfo:
         try:
+            information = _run([pdfinfo, str(path)], timeout=30)
+            page_match = re.search(
+                r"^Pages:\s*(\d+)\s*$", information.stdout, re.MULTILINE
+            )
+            if information.returncode == 0 and page_match:
+                page_count = int(page_match.group(1))
             metadata = _run([pdfinfo, "-meta", str(path)], timeout=30)
             if metadata.returncode == 0:
                 _scan_language(metadata.stdout, result, "PDF metadata")
@@ -633,20 +773,40 @@ def _scan_pdf(path: Path, sha256: str) -> ScanResult:
     if not renderer:
         result.add(Finding("PDF_RENDERER_UNAVAILABLE", "review", "environment"))
         return result
+    if page_count is None:
+        result.add(Finding("PDF_PAGE_COUNT_UNAVAILABLE", "review", "environment"))
+        return result
+    if page_count > MAX_PDF_PAGES:
+        result.add(Finding("PDF_PAGE_LIMIT_EXCEEDED", "review", "document"))
+        return result
     try:
         with tempfile.TemporaryDirectory() as directory:
-            prefix = Path(directory) / "page"
-            completed = _run(
-                [renderer, "-png", "-r", "150", str(path), str(prefix)],
-                timeout=180,
-            )
-            pages = sorted(Path(directory).glob("page-*.png"))
-            if completed.returncode != 0 or not pages:
-                result.add(Finding("PDF_RENDER_ERROR", "review", "document"))
-            else:
-                for index, page in enumerate(pages, 1):
-                    if not _ocr_image(page, result, f"PDF rendered page {index}"):
-                        break
+            for start in range(1, page_count + 1, PDF_RENDER_BATCH_SIZE):
+                end = min(page_count, start + PDF_RENDER_BATCH_SIZE - 1)
+                prefix = Path(directory) / f"page-{start}"
+                completed = _run(
+                    [
+                        renderer,
+                        "-png",
+                        "-r",
+                        "150",
+                        "-f",
+                        str(start),
+                        "-l",
+                        str(end),
+                        str(path),
+                        str(prefix),
+                    ],
+                    timeout=180,
+                )
+                pages = sorted(Path(directory).glob(f"page-{start}-*.png"))
+                if completed.returncode != 0 or len(pages) != end - start + 1:
+                    result.add(Finding("PDF_RENDER_ERROR", "review", "document"))
+                    return result
+                if not _ocr_images(pages, result, f"PDF rendered pages {start}-{end}"):
+                    return result
+                for page in pages:
+                    page.unlink()
     except (OSError, subprocess.SubprocessError):
         result.add(Finding("PDF_RENDER_ERROR", "review", "document"))
     return result
@@ -682,6 +842,8 @@ def scan_file(path_value: str | os.PathLike[str]) -> ScanResult:
         return _scan_pdf(path, sha256)
     if suffix == ".epub":
         return _scan_epub(path, sha256)
+    if suffix in {".azw3", ".mobi"}:
+        return _scan_azw3(path, sha256)
     if suffix in {".docx", ".docm"}:
         return _scan_docx(path, sha256)
     if suffix in {".html", ".htm"}:

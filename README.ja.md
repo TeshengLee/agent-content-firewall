@@ -9,6 +9,8 @@ Agent Content Firewall は、AI エージェント向けのローカルセキュ
 - `pdf-injection-scanner` による PDF テキストの色とフォントサイズ
 - Poppler と Tesseract による PDF レンダリングとローカル OCR
 - PDF のメタデータ、JavaScript、埋め込み添付ファイル
+- EPUB コンテナ、大量の画像、ローカル OCR 結果
+- 分離された KindleUnpack 展開処理による暗号化されていない AZW3 と MOBI
 - DOCX の非表示テキスト、マクロ、埋め込みオブジェクト、代替テキスト、外部リレーション
 - HTML の非表示要素、コメント、属性、アクティブ要素、画面外スタイル
 - ゼロ幅文字、双方向制御文字、Unicode タグ文字
@@ -71,7 +73,7 @@ python3 scripts/install_codex.py --apply
 
 第三者のモデルまたは API リレーは、応答がエージェントへ届く前に返信やツール呼び出しを改変できます。信頼できないリレーをフルアクセスや無人実行と組み合わせないでください。シェルコマンド検査は多層防御の一部であり、信頼できるモデル接続先、サンドボックス、承認、制限されたネットワークアクセスの代替ではありません。
 
-バックグラウンドサービスやリモートの意味分類器は使用しません。PDF 解析依存関係は `uv.lock` に固定され、オープンソースの [`pdf-injection-scanner`](https://github.com/Andy8647/pdf-injection-scanner) を利用します。
+バックグラウンドサービスやリモートの意味分類器は使用しません。EPUB、暗号化されていない AZW3/MOBI、一般的なプロジェクト設定、PDF、DOCX、HTML、テキスト、画像を検査します。形式ごとの依存関係は `uv.lock` に固定されています。ライセンスは[サードパーティー通知](THIRD_PARTY_NOTICES.md)を参照してください。
 
 ## 開発と検証
 

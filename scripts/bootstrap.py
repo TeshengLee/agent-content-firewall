@@ -20,9 +20,15 @@ def main() -> None:
         str(ROOT),
         "--extra",
         "pdf",
+        "--extra",
+        "azw3",
         "--no-editable",
         "--reinstall-package",
         "agent-content-firewall",
+        "--reinstall-package",
+        "pdf-injection-scanner",
+        "--reinstall-package",
+        "mobi",
     ]
     completed = subprocess.run(command, check=False, env=os.environ.copy())
     if completed.returncode != 0:

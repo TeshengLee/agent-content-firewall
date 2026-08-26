@@ -1,6 +1,6 @@
 # Integration
 
-Run `python3 scripts/bootstrap.py` from the plugin root once. This creates an isolated runtime and installs the pinned PDF scanner. It does not modify client configuration.
+Run `python3 scripts/bootstrap.py` from the plugin root once. This creates an isolated runtime and installs the pinned PDF and AZW3/MOBI scanners. It does not modify client configuration.
 
 ## Codex
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-content-firewall",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "description": "Local firewall for malicious content and shell tool calls",
   "author": {
     "name": "TeshengLee"
