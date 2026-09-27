@@ -254,11 +254,43 @@ giving up after {REVIEW_PROMPT_SECONDS}
 end run"""
 
 
-def ask_user_review(summary: dict[str, object]) -> bool:
+REVIEW_ALERT_SOUND = "/System/Library/Sounds/Glass.aiff"
+REVIEW_ALERT_VOICE = "Tingting"
+CLIENT_LABELS = {"codex": "Codex", "claude": "Claude", "workbuddy": "WorkBuddy"}
+
+
+def announce_review(client: str) -> None:
+    """Play a chime and speak the request locally without blocking the dialog."""
+    spoken = f"{CLIENT_LABELS.get(client, client)} 请求任务放行"
+    try:
+        subprocess.Popen(
+            [
+                "/bin/sh",
+                "-c",
+                '/usr/bin/afplay "$1"; /usr/bin/say -v "$2" "$3"',
+                "sh",
+                REVIEW_ALERT_SOUND,
+                REVIEW_ALERT_VOICE,
+                spoken,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
+def ask_user_review(summary: dict[str, object], client: str = "codex") -> bool:
     """Show a local macOS dialog for review-level findings; anything but an explicit allow denies."""
+    announce_review(client)
     names = [Path(str(path)).name for path in summary.get("paths", [])]
     codes = ", ".join(str(code) for code in summary.get("codes", []))
-    text = "扫描结果为 review（非 block），需要你判断是否放行本次读取。\n\n"
+    text = (
+        f"{CLIENT_LABELS.get(client, client)} 请求任务放行。\n"
+        "扫描结果为 review（非 block），需要你判断是否放行本次读取。\n\n"
+    )
     if names:
         text += "文件：\n" + "\n".join(names[:10])
         if len(names) > 10:
@@ -282,7 +314,7 @@ def hook_output(client: str, phase: str, summary: dict[str, object]) -> str:
         return ""
     message = reason(summary)
     if client == "codex" and phase == "pre" and summary.get("status") == "review":
-        if ask_user_review(summary):
+        if ask_user_review(summary, client):
             return ""
         message = f"User did not approve review-level content ({', '.join(str(c) for c in summary.get('codes', []))})."
     if client == "raw":
