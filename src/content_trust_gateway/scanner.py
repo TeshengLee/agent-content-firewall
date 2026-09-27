@@ -218,7 +218,12 @@ def _scan_unicode(text: str, result: ScanResult, location: str) -> None:
     hidden_at = next((i for i, char in enumerate(text) if char in ZERO_WIDTH), None)
     if hidden_at is not None:
         result.add(
-            Finding("INVISIBLE_UNICODE", "review", location, _excerpt(text, hidden_at, hidden_at + 1))
+            Finding(
+                "INVISIBLE_UNICODE",
+                "review",
+                location,
+                _excerpt(text, hidden_at, hidden_at + 1),
+            )
         )
     if any(ord(char) in BIDI_CODEPOINTS for char in text):
         result.add(Finding("BIDI_CONTROL", "block", location))
@@ -230,11 +235,21 @@ def _scan_language(text: str, result: ScanResult, location: str) -> None:
     _scan_unicode(text, result, location)
     if _has_exfiltration(text):
         result.add(
-            Finding("AGENT_EXFILTRATION_INSTRUCTION", "block", location, _exfiltration_excerpt(text))
+            Finding(
+                "AGENT_EXFILTRATION_INSTRUCTION",
+                "block",
+                location,
+                _exfiltration_excerpt(text),
+            )
         )
     elif _has_instruction(text):
         result.add(
-            Finding("AGENT_DIRECTED_INSTRUCTION", "review", location, _instruction_excerpt(text))
+            Finding(
+                "AGENT_DIRECTED_INSTRUCTION",
+                "review",
+                location,
+                _instruction_excerpt(text),
+            )
         )
 
 
@@ -398,7 +413,9 @@ def _scan_docx(path: Path, sha256: str) -> ScanResult:
                             pale = value in {"FFFFFF", "FEFEFE", "FDFDFD"}
                     if hidden or tiny or pale:
                         severity = "block" if _has_instruction(text) else "review"
-                        result.add(Finding("HIDDEN_DOCX_RUN", severity, name, _excerpt(text)))
+                        result.add(
+                            Finding("HIDDEN_DOCX_RUN", severity, name, _excerpt(text))
+                        )
                         _scan_language(text, result, name)
                     else:
                         visible_text.append(text)
@@ -752,7 +769,9 @@ def _merge_pdf_scanner_finding(result: ScanResult, finding: dict[str, object]) -
             result.add(Finding("PDF_SCANNER_FINDING", "review", page))
         return
     detail = " ".join(
-        part for part in (str(finding.get("type", "")), str(finding.get("content", ""))) if part
+        part
+        for part in (str(finding.get("type", "")), str(finding.get("content", "")))
+        if part
     )
     result.add(Finding("PDF_SCANNER_FINDING", "review", page, _excerpt(detail)))
 

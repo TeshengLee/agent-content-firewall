@@ -18,7 +18,18 @@ Agent Content Firewall is a local security firewall for AI agents. It blocks mal
 - MCP and other tool results before they return to the agent
 - shell commands that access credential paths, collect environment data, upload piped content, or execute downloaded code
 
-Results are `clean`, `review`, `block`, or `error`. Every result other than `clean` stops the hooked operation by default.
+Results are `clean`, `review`, `block`, or `error`. Every result other than `clean` stops the hooked operation by default, except for the Codex `review` handling below.
+
+### Codex review prompts (macOS)
+
+For Codex pre-tool checks:
+
+- `block` and `error` results are denied.
+- `review` results that carry no concrete evidence are allowed without a prompt. These are `IMAGE_HIDDEN_CHANNELS_NOT_PROVABLE`, which every image receives, and `UNSUPPORTED_DOCUMENT_FORMAT`.
+- Other `review` results open a local macOS dialog that lists the files, describes each finding, and shows the matched text. Only 放行一次 (Allow once) lets the tool call proceed. 拒绝 (Deny), a 120-second timeout, or a dialog failure denies it. Codex rejects `permissionDecision: "ask"` from PreToolUse hooks, so the hook asks the user directly.
+- The dialog plays a chime and speaks “Codex 请求任务放行” with the `Tingting` voice, at most once every 60 seconds.
+
+Matched text appears only in the local dialog. The deny reason returned to the agent contains finding codes only.
 
 ## Local setup
 

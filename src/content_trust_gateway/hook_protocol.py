@@ -262,7 +262,9 @@ CLIENT_LABELS = {"codex": "Codex", "claude": "Claude", "workbuddy": "WorkBuddy"}
 
 
 REVIEW_ALERT_COOLDOWN_SECONDS = 60
-REVIEW_ALERT_STAMP = Path.home() / ".local/state/agent-content-firewall/last-review-alert"
+REVIEW_ALERT_STAMP = (
+    Path.home() / ".local/state/agent-content-firewall/last-review-alert"
+)
 
 
 def _claim_alert_slot() -> bool:
@@ -353,7 +355,7 @@ REVIEW_CODE_LABELS = {
 
 
 def only_no_evidence(summary: dict[str, object]) -> bool:
-    codes = set(str(code) for code in summary.get("codes", []))
+    codes = {str(code) for code in summary.get("codes", [])}
     return bool(codes) and codes <= NO_EVIDENCE_REVIEW_CODES
 
 
@@ -394,6 +396,7 @@ def ask_user_review(summary: dict[str, object], client: str = "codex") -> bool:
         completed = subprocess.run(
             ["/usr/bin/osascript", "-e", REVIEW_PROMPT_SCRIPT, text],
             capture_output=True,
+            check=False,
             text=True,
             timeout=REVIEW_PROMPT_SECONDS + 15,
         )

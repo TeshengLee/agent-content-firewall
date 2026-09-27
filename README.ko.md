@@ -18,7 +18,18 @@ Agent Content Firewall은 AI 에이전트를 위한 로컬 보안 방화벽입�
 - MCP 및 기타 도구 결과가 에이전트로 반환되기 전 검사
 - 자격 증명 경로 접근, 환경 정보 수집, 파이프 데이터 업로드 또는 다운로드한 코드 실행을 시도하는 셸 명령
 
-결과는 `clean`, `review`, `block`, `error` 중 하나입니다. 기본적으로 `clean` 이외의 결과가 나오면 Hook 작업을 중단하고 추가 검토를 요청합니다.
+결과는 `clean`, `review`, `block`, `error` 중 하나입니다. 기본적으로 `clean` 이외의 결과가 나오면 Hook 작업을 중단하고 추가 검토를 요청합니다. 단, Codex의 `review` 결과는 아래와 같이 처리합니다.
+
+### Codex 확인 대화상자(macOS)
+
+Codex의 도구 실행 전 검사는 다음과 같이 처리합니다.
+
+- `block`과 `error`는 거부합니다.
+- 구체적인 탐지 내용이 없는 `review` 결과는 확인 없이 허용합니다. 모든 이미지에 붙는 `IMAGE_HIDDEN_CHANNELS_NOT_PROVABLE`과 `UNSUPPORTED_DOCUMENT_FORMAT`이 해당합니다.
+- 그 밖의 `review` 결과는 로컬 macOS 대화상자에 파일, 각 탐지 내용 설명, 일치한 텍스트를 표시합니다. 「放行一次」(이번만 허용)를 선택한 경우에만 계속 실행합니다. 「拒绝」(거부), 120초 시간 초과, 대화상자 오류는 모두 거부로 처리합니다. Codex의 PreToolUse Hook은 `permissionDecision: "ask"`를 지원하지 않으므로 Hook이 사용자에게 직접 확인합니다.
+- 대화상자를 띄울 때 알림음을 재생하고 `Tingting` 음성으로 「Codex 请求任务放行」을 읽어 줍니다. 음성 안내는 60초에 한 번까지입니다.
+
+일치한 텍스트는 로컬 대화상자에만 표시되며, 에이전트에 반환되는 거부 사유에는 탐지 코드만 포함됩니다.
 
 ## 로컬 설정
 

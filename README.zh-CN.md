@@ -18,7 +18,18 @@ AI 智能体的本地安全防火墙，拦截恶意内容，防范智能体被�
 - 在 MCP 及其他工具结果返回智能体之前进行检查
 - 检查访问凭据路径、收集环境信息、通过管道上传数据或执行下载代码的 Shell 命令
 
-检查结果分为 `clean`、`review`、`block` 和 `error`。默认情况下，除 `clean` 以外的结果都会停止相应 Hook 操作，等待进一步核对。
+检查结果分为 `clean`、`review`、`block` 和 `error`。默认情况下，除 `clean` 以外的结果都会停止相应 Hook 操作，等待进一步核对；Codex 的 `review` 结果按下述方式处理。
+
+### Codex 待判断结果弹窗（macOS）
+
+Codex 调用工具前的检查结果按以下方式处理：
+
+- `block` 和 `error` 直接拒绝。
+- 不含具体发现的 `review` 结果直接放行，不弹窗。包括每张图片都会带上的 `IMAGE_HIDDEN_CHANNELS_NOT_PROVABLE`，以及 `UNSUPPORTED_DOCUMENT_FORMAT`。
+- 其他 `review` 结果会在本机弹出 macOS 对话框，列明文件、每项发现的中文说明和命中原文。只有点击“放行一次”才继续执行；点击“拒绝”、120 秒内未选择或弹窗失败均按拒绝处理。Codex 的 PreToolUse Hook 不接受 `permissionDecision: "ask"`，因此由 Hook 直接询问用户。
+- 弹窗时播放提示音，并用 `Tingting` 语音播报“Codex 请求任务放行”，60 秒内最多播报一次。
+
+命中原文只显示在本机弹窗中，返回给智能体的拒绝理由只包含提示码。
 
 ## 本地设置
 
