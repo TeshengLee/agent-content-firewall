@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -213,6 +214,7 @@ def evaluate(payload: dict[str, Any], phase: str) -> dict[str, object]:
                 results.append(command_result)
         summary = summarize(results)
         summary["files"] = len(paths)
+        summary["paths"] = paths
         return summary
 
     response = payload.get(
@@ -239,10 +241,50 @@ def reason(summary: dict[str, object]) -> str:
     return f"Untrusted content requires review before the agent can continue ({codes or 'scan failure'})."
 
 
+REVIEW_PROMPT_SECONDS = 120
+REVIEW_ALLOW_BUTTON = "放行一次"
+REVIEW_DENY_BUTTON = "拒绝"
+REVIEW_PROMPT_SCRIPT = f"""on run argv
+    set r to display dialog (item 1 of argv) with title "Agent Content Firewall" \
+buttons {{"{REVIEW_DENY_BUTTON}", "{REVIEW_ALLOW_BUTTON}"}} \
+default button "{REVIEW_DENY_BUTTON}" with icon caution \
+giving up after {REVIEW_PROMPT_SECONDS}
+    if gave up of r then return "timeout"
+    return button returned of r
+end run"""
+
+
+def ask_user_review(summary: dict[str, object]) -> bool:
+    """Show a local macOS dialog for review-level findings; anything but an explicit allow denies."""
+    names = [Path(str(path)).name for path in summary.get("paths", [])]
+    codes = ", ".join(str(code) for code in summary.get("codes", []))
+    text = "扫描结果为 review（非 block），需要你判断是否放行本次读取。\n\n"
+    if names:
+        text += "文件：\n" + "\n".join(names[:10])
+        if len(names) > 10:
+            text += f"\n……另 {len(names) - 10} 个"
+        text += "\n\n"
+    text += f"提示码：{codes or '无'}\n\n{REVIEW_PROMPT_SECONDS} 秒内未选择按拒绝处理。"
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/osascript", "-e", REVIEW_PROMPT_SCRIPT, text],
+            capture_output=True,
+            text=True,
+            timeout=REVIEW_PROMPT_SECONDS + 15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0 and completed.stdout.strip() == REVIEW_ALLOW_BUTTON
+
+
 def hook_output(client: str, phase: str, summary: dict[str, object]) -> str:
     if summary.get("status") == "clean":
         return ""
     message = reason(summary)
+    if client == "codex" and phase == "pre" and summary.get("status") == "review":
+        if ask_user_review(summary):
+            return ""
+        message = f"User did not approve review-level content ({', '.join(str(c) for c in summary.get('codes', []))})."
     if client == "raw":
         return json.dumps({"decision": "block", "reason": message, "summary": summary})
     if client == "workbuddy":
