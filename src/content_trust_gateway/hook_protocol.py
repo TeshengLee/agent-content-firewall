@@ -312,21 +312,84 @@ def announce_review(client: str) -> None:
         pass
 
 
+# Review codes that only say "not checked / cannot prove clean" and carry no concrete evidence.
+NO_EVIDENCE_REVIEW_CODES = frozenset(
+    {"IMAGE_HIDDEN_CHANNELS_NOT_PROVABLE", "UNSUPPORTED_DOCUMENT_FORMAT"}
+)
+REVIEW_DETAIL_LIMIT = 5
+REVIEW_CODE_LABELS = {
+    "AGENT_DIRECTED_INSTRUCTION": "文字中出现疑似针对 AI 的指令",
+    "INVISIBLE_UNICODE": "文字中夹有零宽等不可见字符",
+    "HIDDEN_HTML_TEXT": "网页中有隐藏文字",
+    "HIDDEN_DOCX_RUN": "Word 中有隐藏、极小字号或白色文字",
+    "PDF_SCANNER_FINDING": "PDF 扫描器报告异常（如隐藏或低对比文字）",
+    "ACTIVE_HTML_CONTENT": "网页含脚本或内嵌框架",
+    "OOXML_EXTERNAL_RELATIONSHIP": "Office 文件引用外部链接或资源",
+    "EPUB_ACTIVE_CONTENT": "电子书含脚本",
+    "EPUB_NESTED_ARCHIVE": "电子书内嵌压缩包",
+    "EPUB_MIMETYPE_INVALID": "电子书格式声明异常",
+    "EPUB_MIMETYPE_MISSING": "电子书缺少格式声明",
+    "EPUB_MEMBER_LIMIT_EXCEEDED": "电子书文件数超出扫描上限，未扫完",
+    "EPUB_UNCOMPRESSED_LIMIT_EXCEEDED": "电子书解压后过大，未扫完",
+    "EPUB_TEXT_LIMIT_EXCEEDED": "电子书文字过多，未扫完",
+    "EPUB_IMAGE_LIMIT_EXCEEDED": "电子书图片过多，未扫完",
+    "TEXT_LIMIT_EXCEEDED": "文字过长，只扫描了前段",
+    "FILE_SIZE_LIMIT_EXCEEDED": "文件过大，未扫描",
+    "PDF_PAGE_LIMIT_EXCEEDED": "PDF 页数超出扫描上限，未扫完",
+    "PDF_PAGE_COUNT_UNAVAILABLE": "读不出 PDF 页数，未扫描",
+    "PDF_RENDER_ERROR": "PDF 渲染失败，未做 OCR",
+    "PDF_RENDERER_UNAVAILABLE": "缺少 PDF 渲染工具，未做 OCR",
+    "PDF_TEXT_EXTRACTION_ERROR": "PDF 文字层提取失败",
+    "PDF_SCANNER_UNAVAILABLE": "缺少 PDF 注入扫描器，未扫描",
+    "PDF_ACTIVE_CONTENT_CHECK_ERROR": "PDF 脚本检查失败",
+    "PDF_ATTACHMENT_CHECK_ERROR": "PDF 附件检查失败",
+    "LOCAL_OCR_ERROR": "本地 OCR 失败，未检查图片文字",
+    "LOCAL_OCR_UNAVAILABLE": "缺少本地 OCR，未检查图片文字",
+    "SHELL_ENVIRONMENT_DISCOVERY": "命令会读取环境变量等系统信息",
+    "SHELL_FILE_UPLOAD": "命令可能上传文件",
+    "SHELL_SENSITIVE_PATH_ACCESS": "命令访问敏感路径（如密钥、配置目录）",
+    "TOOL_SENSITIVE_PATH_ACCESS": "读取敏感路径（如密钥、配置目录）",
+}
+
+
+def only_no_evidence(summary: dict[str, object]) -> bool:
+    codes = set(str(code) for code in summary.get("codes", []))
+    return bool(codes) and codes <= NO_EVIDENCE_REVIEW_CODES
+
+
+def _review_details_text(summary: dict[str, object]) -> str:
+    lines: list[str] = []
+    details = [
+        item
+        for item in summary.get("details", [])
+        if isinstance(item, dict) and item.get("code") not in NO_EVIDENCE_REVIEW_CODES
+    ]
+    for item in details[:REVIEW_DETAIL_LIMIT]:
+        code = str(item.get("code", ""))
+        label = REVIEW_CODE_LABELS.get(code, code)
+        lines.append(f"· {label}（{item.get('location', '')}）")
+        excerpt = str(item.get("excerpt") or "")
+        if excerpt:
+            lines.append(f"  命中原文：「{excerpt}」")
+    if len(details) > REVIEW_DETAIL_LIMIT:
+        lines.append(f"……另 {len(details) - REVIEW_DETAIL_LIMIT} 处")
+    return "\n".join(lines)
+
+
 def ask_user_review(summary: dict[str, object], client: str = "codex") -> bool:
     """Show a local macOS dialog for review-level findings; anything but an explicit allow denies."""
     announce_review(client)
     names = [Path(str(path)).name for path in summary.get("paths", [])]
-    codes = ", ".join(str(code) for code in summary.get("codes", []))
     text = (
         f"{CLIENT_LABELS.get(client, client)} 请求任务放行。\n"
-        "扫描结果为 review（非 block），需要你判断是否放行本次读取。\n\n"
+        "扫描发现以下需要你判断的内容：\n\n"
     )
     if names:
         text += "文件：\n" + "\n".join(names[:10])
         if len(names) > 10:
             text += f"\n……另 {len(names) - 10} 个"
         text += "\n\n"
-    text += f"提示码：{codes or '无'}\n\n{REVIEW_PROMPT_SECONDS} 秒内未选择按拒绝处理。"
+    text += f"{_review_details_text(summary)}\n\n{REVIEW_PROMPT_SECONDS} 秒内未选择按拒绝处理。"
     try:
         completed = subprocess.run(
             ["/usr/bin/osascript", "-e", REVIEW_PROMPT_SCRIPT, text],
@@ -344,7 +407,7 @@ def hook_output(client: str, phase: str, summary: dict[str, object]) -> str:
         return ""
     message = reason(summary)
     if client == "codex" and phase == "pre" and summary.get("status") == "review":
-        if ask_user_review(summary, client):
+        if only_no_evidence(summary) or ask_user_review(summary, client):
             return ""
         message = f"User did not approve review-level content ({', '.join(str(c) for c in summary.get('codes', []))})."
     if client == "raw":

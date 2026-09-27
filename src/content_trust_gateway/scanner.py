@@ -10,7 +10,7 @@ import sys
 import tempfile
 import zipfile
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
@@ -129,6 +129,7 @@ class Finding:
     code: str
     severity: str
     location: str
+    excerpt: str = field(default="", compare=False)
 
 
 @dataclass
@@ -168,6 +169,41 @@ def _has_instruction(text: str) -> bool:
     return any(pattern.search(text) for pattern in INSTRUCTION_PATTERNS)
 
 
+EXCERPT_CONTEXT_CHARS = 60
+EXCERPT_MAX_CHARS = 220
+
+
+def _excerpt(text: str, start: int = 0, end: int | None = None) -> str:
+    """One-line snippet around text[start:end] for showing the user what matched."""
+    end = len(text) if end is None else end
+    left = max(0, start - EXCERPT_CONTEXT_CHARS)
+    right = min(len(text), end + EXCERPT_CONTEXT_CHARS)
+    snippet = "".join(
+        "⟦不可见字符⟧" if char in ZERO_WIDTH or ord(char) in BIDI_CODEPOINTS else char
+        for char in text[left:right]
+    )
+    snippet = " ".join(snippet.split())
+    truncated = right < len(text) or len(snippet) > EXCERPT_MAX_CHARS
+    snippet = snippet[:EXCERPT_MAX_CHARS]
+    return ("…" if left > 0 else "") + snippet + ("…" if truncated else "")
+
+
+def _instruction_excerpt(text: str) -> str:
+    for pattern in INSTRUCTION_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return _excerpt(text, match.start(), match.end())
+    return ""
+
+
+def _exfiltration_excerpt(text: str) -> str:
+    for pattern in EXFIL_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return _excerpt(text, match.start(), match.end())
+    return ""
+
+
 def _has_exfiltration(text: str) -> bool:
     for pattern in EXFIL_PATTERNS:
         for match in pattern.finditer(text):
@@ -179,8 +215,11 @@ def _has_exfiltration(text: str) -> bool:
 
 
 def _scan_unicode(text: str, result: ScanResult, location: str) -> None:
-    if any(char in ZERO_WIDTH for char in text):
-        result.add(Finding("INVISIBLE_UNICODE", "review", location))
+    hidden_at = next((i for i, char in enumerate(text) if char in ZERO_WIDTH), None)
+    if hidden_at is not None:
+        result.add(
+            Finding("INVISIBLE_UNICODE", "review", location, _excerpt(text, hidden_at, hidden_at + 1))
+        )
     if any(ord(char) in BIDI_CODEPOINTS for char in text):
         result.add(Finding("BIDI_CONTROL", "block", location))
     if any(ord(char) in TAG_RANGE for char in text):
@@ -190,9 +229,13 @@ def _scan_unicode(text: str, result: ScanResult, location: str) -> None:
 def _scan_language(text: str, result: ScanResult, location: str) -> None:
     _scan_unicode(text, result, location)
     if _has_exfiltration(text):
-        result.add(Finding("AGENT_EXFILTRATION_INSTRUCTION", "block", location))
+        result.add(
+            Finding("AGENT_EXFILTRATION_INSTRUCTION", "block", location, _exfiltration_excerpt(text))
+        )
     elif _has_instruction(text):
-        result.add(Finding("AGENT_DIRECTED_INSTRUCTION", "review", location))
+        result.add(
+            Finding("AGENT_DIRECTED_INSTRUCTION", "review", location, _instruction_excerpt(text))
+        )
 
 
 def scan_text(text: str, kind: str = "text", location: str = "content") -> ScanResult:
@@ -264,6 +307,7 @@ def _scan_html(text: str, sha256: str) -> ScanResult:
                 "HIDDEN_HTML_TEXT",
                 "block" if _has_instruction(hidden) else "review",
                 "hidden DOM",
+                _excerpt(hidden),
             )
         )
         _scan_language(hidden, result, "hidden DOM")
@@ -354,7 +398,7 @@ def _scan_docx(path: Path, sha256: str) -> ScanResult:
                             pale = value in {"FFFFFF", "FEFEFE", "FDFDFD"}
                     if hidden or tiny or pale:
                         severity = "block" if _has_instruction(text) else "review"
-                        result.add(Finding("HIDDEN_DOCX_RUN", severity, name))
+                        result.add(Finding("HIDDEN_DOCX_RUN", severity, name, _excerpt(text)))
                         _scan_language(text, result, name)
                     else:
                         visible_text.append(text)
@@ -373,6 +417,7 @@ def _merge_result(target: ScanResult, source: ScanResult, prefix: str) -> None:
                 finding.code,
                 finding.severity,
                 f"{prefix}: {finding.location}",
+                finding.excerpt,
             )
         )
 
@@ -706,7 +751,10 @@ def _merge_pdf_scanner_finding(result: ScanResult, finding: dict[str, object]) -
         elif not content:
             result.add(Finding("PDF_SCANNER_FINDING", "review", page))
         return
-    result.add(Finding("PDF_SCANNER_FINDING", "review", page))
+    detail = " ".join(
+        part for part in (str(finding.get("type", "")), str(finding.get("content", ""))) if part
+    )
+    result.add(Finding("PDF_SCANNER_FINDING", "review", page, _excerpt(detail)))
 
 
 def _scan_pdf(path: Path, sha256: str) -> ScanResult:
@@ -894,4 +942,10 @@ def summarize(results: Iterable[ScanResult]) -> dict[str, object]:
         if STATUS_RANK[value.status] > STATUS_RANK[status]:
             status = value.status
     codes = sorted({finding.code for value in values for finding in value.findings})
-    return {"status": status, "files": len(values), "codes": codes}
+    details = [
+        {"code": finding.code, "location": finding.location, "excerpt": finding.excerpt}
+        for value in values
+        for finding in value.findings
+        if finding.severity == "review"
+    ]
+    return {"status": status, "files": len(values), "codes": codes, "details": details}
