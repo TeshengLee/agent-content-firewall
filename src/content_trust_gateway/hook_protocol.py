@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import shlex
 import subprocess
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -259,8 +261,36 @@ REVIEW_ALERT_VOICE = "Tingting"
 CLIENT_LABELS = {"codex": "Codex", "claude": "Claude", "workbuddy": "WorkBuddy"}
 
 
+REVIEW_ALERT_COOLDOWN_SECONDS = 60
+REVIEW_ALERT_STAMP = Path.home() / ".local/state/agent-content-firewall/last-review-alert"
+
+
+def _claim_alert_slot() -> bool:
+    """Return True at most once per cooldown window, even across concurrent hooks."""
+    try:
+        REVIEW_ALERT_STAMP.parent.mkdir(parents=True, exist_ok=True)
+        with open(REVIEW_ALERT_STAMP, "a+", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            handle.seek(0)
+            try:
+                last = float(handle.read().strip() or 0)
+            except ValueError:
+                last = 0.0
+            now = time.time()
+            if now - last < REVIEW_ALERT_COOLDOWN_SECONDS:
+                return False
+            handle.seek(0)
+            handle.truncate()
+            handle.write(str(now))
+            return True
+    except OSError:
+        return True
+
+
 def announce_review(client: str) -> None:
     """Play a chime and speak the request locally without blocking the dialog."""
+    if not _claim_alert_slot():
+        return
     spoken = f"{CLIENT_LABELS.get(client, client)} 请求任务放行"
     try:
         subprocess.Popen(
